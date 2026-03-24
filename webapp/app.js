@@ -10,6 +10,14 @@ function switchView(viewName) {
 
     document.getElementById(`view-${viewName}`).classList.add('active');
     event.currentTarget.classList.add('active');
+
+    // Start/stop pipeline polling based on active tab
+    if (viewName === 'pipeline') {
+        loadPipelineVideos();
+        startPipelinePolling();
+    } else {
+        stopPipelinePolling();
+    }
 }
 
 // ─── Init ────────────────────────────────────────────────────────────────
@@ -198,13 +206,14 @@ function renderSteps(steps) {
         if (step.status === 'running') icon = '⚡';
         else if (step.status === 'done') icon = '✅';
         else if (step.status === 'error') icon = '❌';
+        else if (step.status === 'blocked') icon = '🚫';
         else icon = `${i + 1}️⃣`;
 
         item.innerHTML = `
             <div class="step-icon">${icon}</div>
             <div class="step-content">
                 <div class="step-name">${step.name}</div>
-                <div class="step-detail">${step.detail || (step.status === 'pending' ? 'Waiting...' : '')}</div>
+                <div class="step-detail">${step.detail || (step.status === 'pending' ? 'Waiting...' : step.status === 'blocked' ? 'Blocked by previous failure' : '')}</div>
             </div>
             <div class="step-progress-mini">
                 <div class="step-progress-mini-bar" style="width: ${step.progress}%"></div>
@@ -254,22 +263,24 @@ function renderTopics(allTopics, selectedTopics) {
 // ─── Pipeline Videos ─────────────────────────────────────────────────────
 let pipelinePollInterval = null;
 
+function startPipelinePolling() {
+    if (!pipelinePollInterval) {
+        pipelinePollInterval = setInterval(loadPipelineVideos, 3000);
+    }
+}
+
+function stopPipelinePolling() {
+    if (pipelinePollInterval) {
+        clearInterval(pipelinePollInterval);
+        pipelinePollInterval = null;
+    }
+}
+
 async function loadPipelineVideos() {
     try {
         const resp = await fetch(`${API_BASE}/api/pipeline-videos`);
         const videos = await resp.json();
         renderPipelineVideos(videos);
-
-        // Check if any video is running — if so, start pipeline polling
-        const hasRunning = videos.some(v =>
-            v.steps.some(s => s.status === 'running')
-        );
-        if (hasRunning && !pipelinePollInterval) {
-            pipelinePollInterval = setInterval(loadPipelineVideos, 3000);
-        } else if (!hasRunning && pipelinePollInterval) {
-            clearInterval(pipelinePollInterval);
-            pipelinePollInterval = null;
-        }
     } catch (e) {
         console.log('No pipeline data');
     }
@@ -379,6 +390,7 @@ function renderPipelineVideos(videos) {
             </div>
             <div class="pipeline-topic">${video.topic}</div>
             <div class="pipeline-steps">${stepsHtml}</div>
+            <div class="pipeline-card-actions">${btnHtml}</div>
         `;
 
         grid.appendChild(card);

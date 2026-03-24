@@ -639,3 +639,32 @@ KLING_SECRET_KEY=...            # Kling 3.0
 - **Rule**: When creating ANY new execution script, read `video_pipeline_master.md` in FULL first. Cross-check every decision against the Self-Annealing Log (Learnings 1-20). Do NOT rely on memory.
 - **Rule**: Script headers should list which rules they comply with (e.g., `# Compliant with: Learning 8, Rule Set 9.1, ...`)
 - **Script**: `execution/run_pipeline.py` — the corrected parameterized orchestrator
+
+### Learning 22: Kling API requires RAW base64 — no data URI prefix (2026-03-24)
+- Kling `/v1/videos/image2video` expects `"image": "<raw_base64>"` — NOT `"image": "data:image/png;base64,<b64>"`
+- The data URI prefix causes silent rejection (every request fails, no useful error message)
+- JWT tokens MUST be refreshed on each poll call (they expire after 30 min)
+- Always include `negative_prompt` field: `"blurry, distorted, text, watermark, ugly, deformed, zoom in, zoom out, Tagalog, non-English"`
+- Always check `data.get("code") == 0` in API responses, not just HTTP 200
+- **Reference**: The proven working script is `execution/generate_video02_anchor_videos_kling.py` — any Kling code must match it line-by-line
+
+### Learning 23: Pipeline MUST gate on step failures — never proceed past a broken step (2026-03-24)
+- If Step 5 (video gen) produces 2/8 videos, Step 6 (assembly) MUST NOT run — it will fail on missing files
+- If Step 6 fails, Step 7 (polish) MUST NOT run
+- **Pattern**: Each step returns a success/fail status. On failure: log to Google Sheets "Error Log" tab, mark remaining steps as "blocked", halt pipeline
+- **Dashboard**: Blocked steps show gray with "Blocked by Step N failure" detail text
+
+### Learning 24: Modularize execution scripts — orchestrator must be a thin coordinator (2026-03-24)
+- Proven working scripts (assemble_video01.py, polish_video01.py, etc.) contain complex, tested ffmpeg logic. NEVER inline this into the orchestrator
+- **Pattern**: Orchestrator calls modules via `import` or `subprocess.run()`. Each module owns its domain logic
+- **Extracted modules**: `video_engines.py` (Kling/Veo), `error_logger.py` (Sheets error tab), `drive_uploader.py` (Google Drive date/topic folders)
+- Keep orchestrator under 300 lines — if it grows beyond that, extract another module
+
+### Learning 25: Assembly/Polish scripts need dynamic scene config for parameterization (2026-03-24)
+- Assembly script has hardcoded SCENES list (`a2_rule1_speaking`, `b1_safety`, etc.) specific to Video 01
+- New videos generate different scene IDs (e.g., `a2_rule1`, `b1_rule1`)
+- **Fix**: Add `--config scene_config.json` flag to assembly/polish scripts
+- Config JSON contains: scene order, file paths, captions, clip types
+- Without `--config`, scripts default to original hardcoded scenes (backward compatible)
+- **Critical**: All existing ffmpeg filter chains (1.2x anchor, last-40% B-roll, xfade, BGM) MUST remain byte-identical
+

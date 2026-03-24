@@ -37,6 +37,12 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
+# Add execution/ to path for module imports
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from video_engines import generate_kling_video, generate_veo_video
+from error_logger import log_error, log_blocked_steps
+from drive_uploader import upload_pipeline_assets
+
 load_dotenv()
 
 # ─── API Keys ──────────────────────────────────────────────────────────────────
@@ -491,7 +497,10 @@ def step4_video_prompts(script: dict, image_results: list, video_dir: Path,
 
 def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path, vid: int,
                           dry_run: bool = False) -> list:
-    """Generate videos — Kling 3.0 primary for ALL, Veo 3.1 backup for anchors."""
+    """Generate videos — Kling 3.0 primary for ALL, Veo 3.1 backup for anchors.
+
+    Uses video_engines module (Learning 22, 24). Matches proven Kling script line-by-line.
+    """
     videos_dir = video_dir / "videos"
     results = []
     total = len(video_prompts)
@@ -505,24 +514,33 @@ def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path
         output = scene_dir / ("anchor_video.mp4" if vp["type"] == "anchor" else "broll_video.mp4")
 
         if dry_run:
-            time.sleep(2)  # Simulate generation time
-            output.write_bytes(b'\x00' * 200)  # Placeholder
+            time.sleep(2)
+            output.write_bytes(b'\x00' * 200)
             results.append({"id": vp["id"], "type": vp["type"],
                             "path": str(output), "status": "OK"})
             print(f"   ✓ [{i+1}/{total}] {vp['id']}: OK [DRY RUN]")
             continue
 
-        # Kling 3.0 PRIMARY (Learning 19)
+        # Kling 3.0 PRIMARY (Learning 19, 22)
         # Anchors: sound "on" (native TTS lip-sync)
         # B-roll: sound "off" (no dialogue)
         sound = "on" if vp["type"] == "anchor" else "off"
-        success = generate_kling_video(vp, output, sound=sound)
+        success = generate_kling_video(
+            image_path=vp["image_path"],
+            prompt=vp["prompt"],
+            output_path=output,
+            sound=sound,
+        )
 
         if not success and vp["type"] == "anchor":
             # Veo 3.1 BACKUP for anchors only
             update_state(state_path, vid, 5, "running",
                          f"Kling failed for {vp['id']}, trying Veo 3.1 backup...")
-            success = generate_veo_video(vp, output)
+            success = generate_veo_video(
+                image_path=vp["image_path"],
+                prompt=vp["prompt"],
+                output_path=output,
+            )
 
         status = "OK" if success else "FAILED"
         results.append({"id": vp["id"], "type": vp["type"],
@@ -533,172 +551,20 @@ def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path
     results_path.write_text(json.dumps(results, indent=2))
 
     ok = sum(1 for r in results if r["status"] == "OK")
-    update_state(state_path, vid, 5, "done",
-                 f"Generated {ok}/{total} videos",
-                 {"results_path": str(results_path)})
+    failed = total - ok
+    if failed > 0:
+        update_state(state_path, vid, 5, "error",
+                     f"Generated {ok}/{total} videos — {failed} FAILED",
+                     {"results_path": str(results_path)})
+    else:
+        update_state(state_path, vid, 5, "done",
+                     f"Generated {ok}/{total} videos",
+                     {"results_path": str(results_path)})
 
     return results
 
 
-def generate_kling_video(vp: dict, output: Path, sound: str = "off") -> bool:
-    """Generate video via Kling 3.0 (PRIMARY engine — Learning 19)."""
-    if not KLING_ACCESS or not KLING_SECRET:
-        print(f"      Kling: No API keys")
-        return False
 
-    try:
-        import jwt
-        payload = {
-            "iss": KLING_ACCESS,
-            "exp": int(time.time()) + 1800,
-            "nbf": int(time.time()) - 5,
-        }
-        token = jwt.encode(payload, KLING_SECRET, algorithm="HS256",
-                           headers={"alg": "HS256", "typ": "JWT"})
-    except Exception as e:
-        print(f"      Kling JWT error: {e}")
-        return False
-
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    image_path = Path(vp["image_path"])
-    if not image_path.exists():
-        print(f"      Image not found: {image_path}")
-        return False
-
-    image_b64 = base64.standard_b64encode(image_path.read_bytes()).decode()
-
-    body = {
-        "model_name": "kling-v3",  # Learning 10
-        "mode": "pro",              # Best quality
-        "duration": "5",
-        "aspect_ratio": "9:16",
-        "image": f"data:image/png;base64,{image_b64}",
-        "prompt": vp["prompt"],
-        "sound": sound,             # "on" for anchors (lip-sync), "off" for B-roll
-    }
-
-    try:
-        print(f"      Kling: Submitting {vp['id']} (sound={sound})...")
-        resp = requests.post("https://api-singapore.klingai.com/v1/videos/image2video",
-                             headers=headers, json=body, timeout=60)
-
-        if resp.status_code != 200:
-            print(f"      Kling HTTP {resp.status_code}: {resp.text[:200]}")
-            return False
-
-        task_id = resp.json().get("data", {}).get("task_id")
-        if not task_id:
-            print(f"      Kling: No task_id in response")
-            return False
-
-        print(f"      Kling: task_id={task_id}, polling...")
-        for attempt in range(40):  # 10 min max
-            time.sleep(15)
-            sr = requests.get(
-                f"https://api-singapore.klingai.com/v1/videos/image2video/{task_id}",
-                headers=headers, timeout=30
-            )
-            if sr.status_code == 200:
-                sd = sr.json().get("data", {})
-                status = sd.get("task_status", "")
-                print(f"      Polling... ({(attempt+1)*15}s) status={status}")
-
-                if status == "succeed":
-                    videos = sd.get("task_result", {}).get("videos", [])
-                    if videos:
-                        vr = requests.get(videos[0]["url"], timeout=120)
-                        if vr.status_code == 200:
-                            output.parent.mkdir(parents=True, exist_ok=True)
-                            output.write_bytes(vr.content)
-                            print(f"      ✓ Saved: {output}")
-                            return True
-                elif status == "failed":
-                    print(f"      Kling task failed")
-                    return False
-
-    except Exception as e:
-        print(f"      Kling error: {e}")
-    return False
-
-
-def generate_veo_video(vp: dict, output: Path) -> bool:
-    """Generate video via Veo 3.1 REST API (BACKUP — Learning 19)."""
-    if not GOOGLE_API_KEY:
-        print(f"      Veo: No API key")
-        return False
-
-    image_path = Path(vp["image_path"])
-    if not image_path.exists():
-        return False
-
-    image_b64 = base64.standard_b64encode(image_path.read_bytes()).decode()
-
-    base_url = "https://generativelanguage.googleapis.com/v1beta"
-    model = "models/veo-3.1-generate-preview"
-    url = f"{base_url}/{model}:predictLongRunning?key={GOOGLE_API_KEY}"
-
-    payload = {
-        "instances": [{
-            "prompt": vp["prompt"],
-            "image": {"bytesBase64Encoded": image_b64, "mimeType": "image/png"},
-        }],
-        "parameters": {
-            "aspectRatio": "9:16",
-            "personGeneration": "allow_adult",  # Learning 11: allow_all not supported
-            "sampleCount": 1,
-        },
-    }
-
-    try:
-        print(f"      Veo: Submitting {vp['id']}...")
-        resp = requests.post(url, json=payload, timeout=60)
-        if resp.status_code != 200:
-            print(f"      Veo HTTP {resp.status_code}: {resp.text[:200]}")
-            return False
-
-        data = resp.json()
-        if "name" not in data:
-            return False
-
-        op = data["name"]
-        poll_url = f"{base_url}/{op}?key={GOOGLE_API_KEY}"
-
-        for attempt in range(40):
-            time.sleep(15)
-            print(f"      Veo polling... ({(attempt+1)*15}s)")
-            pr = requests.get(poll_url, timeout=30)
-            if pr.status_code == 200:
-                pd = pr.json()
-                if pd.get("done"):
-                    if "error" in pd:
-                        print(f"      Veo error: {pd['error']}")
-                        return False
-                    return save_veo_video(pd.get("response", {}), output)
-
-    except Exception as e:
-        print(f"      Veo error: {e}")
-    return False
-
-
-def save_veo_video(response: dict, output: Path) -> bool:
-    """Save video from Veo response — Learning 11 format."""
-    gen = response.get("generateVideoResponse", {})
-    samples = gen.get("generatedSamples", [])
-    if not samples:
-        return False
-
-    uri = samples[0].get("video", {}).get("uri")
-    if not uri:
-        return False
-
-    dl_url = f"{uri}{'&' if '?' in uri else '?'}key={GOOGLE_API_KEY}"
-    dr = requests.get(dl_url, timeout=120)
-    if dr.status_code == 200:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(dr.content)
-        print(f"      ✓ Saved (Veo): {output}")
-        return True
-    return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -714,7 +580,7 @@ def step6_assembly(video_dir: Path, state_path: Path, vid: int, dry_run: bool = 
         time.sleep(1.5)
         update_state(state_path, vid, 6, "done", "[DRY RUN] Assembly simulated")
         print(f"   ✓ [DRY RUN] Assembly simulated")
-        return
+        return True
     result = subprocess.run(
         [sys.executable, "execution/assemble_video01.py"],
         capture_output=True, text=True, cwd=str(Path.cwd()),
@@ -722,10 +588,12 @@ def step6_assembly(video_dir: Path, state_path: Path, vid: int, dry_run: bool = 
     if result.returncode == 0:
         update_state(state_path, vid, 6, "done", "Assembly complete")
         print(f"   ✓ Assembly done")
+        return True
     else:
         update_state(state_path, vid, 6, "error",
                      f"Assembly failed: {result.stderr[:200]}")
         print(f"   ✗ Assembly failed: {result.stderr[:200]}")
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -742,7 +610,7 @@ def step7_polish(video_dir: Path, state_path: Path, vid: int, dry_run: bool = Fa
         time.sleep(1.5)
         update_state(state_path, vid, 7, "done", "[DRY RUN] Polish simulated")
         print(f"   ✓ [DRY RUN] Polish simulated")
-        return
+        return True
     result = subprocess.run(
         [sys.executable, "execution/polish_video01.py"],
         capture_output=True, text=True, cwd=str(Path.cwd()),
@@ -750,48 +618,50 @@ def step7_polish(video_dir: Path, state_path: Path, vid: int, dry_run: bool = Fa
     if result.returncode == 0:
         update_state(state_path, vid, 7, "done", "Polish complete — final video ready")
         print(f"   ✓ Polish done — final video ready")
+        return True
     else:
         update_state(state_path, vid, 7, "error",
                      f"Polish failed: {result.stderr[:200]}")
         print(f"   ✗ Polish failed: {result.stderr[:200]}")
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 8: Upload to Drive
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step8_upload(video_dir: Path, state_path: Path, vid: int, dry_run: bool = False):
-    """Upload final video to Google Drive."""
-    update_state(state_path, vid, 8, "running", "Uploading to Google Drive...")
+def step8_upload(video_dir: Path, topic: str, state_path: Path, vid: int, dry_run: bool = False):
+    """Upload pipeline assets to Google Drive with date/topic folder structure.
+
+    Uses drive_uploader module (Learning 24). Creates YYYY-MM-DD/XX_topic/ folders.
+    """
+    update_state(state_path, vid, 8, "running",
+                 "Uploading to Google Drive (date/topic folders)...")
     if dry_run:
         time.sleep(1)
         update_state(state_path, vid, 8, "done", "[DRY RUN] Upload simulated")
         print(f"   ✓ [DRY RUN] Upload simulated")
-        return
+        return True
 
-    final_video = video_dir / "videos" / f"video_{vid:02d}_final.mp4"
-
-    # Fallback to video_01 path
-    if not final_video.exists():
-        final_video = Path("assets/video_01/videos/video_01_final.mp4")
-
-    if not final_video.exists():
-        update_state(state_path, vid, 8, "error", "Final video not found")
-        print(f"   ✗ Final video not found")
-        return
-
-    result = subprocess.run(
-        [sys.executable, "execution/upload_to_drive.py", "--file", str(final_video)],
-        capture_output=True, text=True, cwd=str(Path.cwd()),
-    )
-    if result.returncode == 0:
-        update_state(state_path, vid, 8, "done", "Uploaded to Google Drive")
-        print(f"   ✓ Uploaded to Drive")
-    else:
-        update_state(state_path, vid, 8, "error",
-                     f"Upload failed: {result.stderr[:200]}")
-        print(f"   ✗ Upload failed")
-
+    try:
+        result = upload_pipeline_assets(video_dir, topic, vid)
+        if result.get("status") == "done":
+            uploaded = result.get("uploaded", {})
+            detail = (f"Uploaded to {result.get('date_folder')}/{result.get('topic_folder')}: "
+                      f"{uploaded.get('images', 0)} images, {uploaded.get('videos', 0)} clips, "
+                      f"{uploaded.get('final', 0)} final")
+            update_state(state_path, vid, 8, "done", detail)
+            print(f"   ✓ {detail}")
+            return True
+        else:
+            reason = result.get('reason', 'unknown')
+            update_state(state_path, vid, 8, "error", f"Upload failed: {reason}")
+            print(f"   ✗ Upload failed: {reason}")
+            return False
+    except Exception as e:
+        update_state(state_path, vid, 8, "error", f"Upload error: {str(e)[:200]}")
+        print(f"   ✗ Upload error: {e}")
+        return False
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
@@ -846,42 +716,99 @@ def main():
         if p.exists():
             video_prompts = json.loads(p.read_text())
 
-    # Run steps
-    if args.step <= 1:
-        print("\n─── Step 1: Concept & Script ────────────────────────────────")
-        script = step1_concept_and_script(args.topic, video_dir, state_path, args.video_id, dry_run=dry_run)
+    # ─── Step Gating (Learning 23): halt on critical failure ───────────────
+    def run_gated_step(step_num, step_fn, *fn_args, **fn_kwargs):
+        """Run a step with error handling and gating."""
+        step_names = {
+            1: "Concept & Script", 2: "Image Prompts", 3: "Image Generation",
+            4: "Video Prompts", 5: "Video Generation", 6: "Assembly",
+            7: "Polish", 8: "Upload to Drive",
+        }
+        name = step_names.get(step_num, f"Step {step_num}")
+        print(f"\n─── Step {step_num}: {name} {'─' * (50 - len(name))}")
+        try:
+            result = step_fn(*fn_args, **fn_kwargs)
+            # Check step 5 specifically for partial failures
+            if step_num == 5 and isinstance(result, list):
+                failed = sum(1 for r in result if r.get("status") != "OK")
+                if failed > 0:
+                    log_error(step_num, args.video_id,
+                              f"{failed} videos failed to generate",
+                              f"Only {len(result) - failed}/{len(result)} succeeded")
+                    return None  # Halt — can't assemble with missing videos
+            return result
+        except Exception as e:
+            error_msg = str(e)[:300]
+            update_state(state_path, args.video_id, step_num, "error", error_msg)
+            log_error(step_num, args.video_id, f"{name} failed", error_msg)
+            print(f"   ✗ {name} FAILED: {error_msg}")
+            return None
 
-    if args.step <= 2:
-        print("\n─── Step 2: Image Prompts ──────────────────────────────────")
-        image_prompts = step2_image_prompts(script, video_dir, state_path, args.video_id)
+    # ─── Run steps with gating ─────────────────────────────────────────────
+    pipeline_failed_at = None
 
-    if args.step <= 3:
-        print("\n─── Step 3: Image Generation ───────────────────────────────")
-        image_results = step3_generate_images(image_prompts, video_dir, state_path, args.video_id, dry_run=dry_run)
+    if args.step <= 1 and not pipeline_failed_at:
+        script = run_gated_step(1, step1_concept_and_script,
+                                args.topic, video_dir, state_path, args.video_id, dry_run=dry_run)
+        if script is None:
+            pipeline_failed_at = 1
 
-    if args.step <= 4:
-        print("\n─── Step 4: Video Prompts ──────────────────────────────────")
-        video_prompts = step4_video_prompts(script, image_results, video_dir, state_path, args.video_id)
+    if args.step <= 2 and not pipeline_failed_at:
+        image_prompts = run_gated_step(2, step2_image_prompts,
+                                       script, video_dir, state_path, args.video_id)
+        if image_prompts is None:
+            pipeline_failed_at = 2
 
-    if args.step <= 5:
-        print("\n─── Step 5: Video Generation ───────────────────────────────")
-        step5_generate_videos(video_prompts, video_dir, state_path, args.video_id, dry_run=dry_run)
+    if args.step <= 3 and not pipeline_failed_at:
+        image_results = run_gated_step(3, step3_generate_images,
+                                       image_prompts, video_dir, state_path, args.video_id, dry_run=dry_run)
+        if image_results is None:
+            pipeline_failed_at = 3
 
-    if args.step <= 6:
-        print("\n─── Step 6: Assembly ───────────────────────────────────────")
-        step6_assembly(video_dir, state_path, args.video_id, dry_run=dry_run)
+    if args.step <= 4 and not pipeline_failed_at:
+        video_prompts = run_gated_step(4, step4_video_prompts,
+                                       script, image_results, video_dir, state_path, args.video_id)
+        if video_prompts is None:
+            pipeline_failed_at = 4
 
-    if args.step <= 7:
-        print("\n─── Step 7: Polish ────────────────────────────────────────")
-        step7_polish(video_dir, state_path, args.video_id, dry_run=dry_run)
+    if args.step <= 5 and not pipeline_failed_at:
+        video_results = run_gated_step(5, step5_generate_videos,
+                                       video_prompts, video_dir, state_path, args.video_id, dry_run=dry_run)
+        if video_results is None:
+            pipeline_failed_at = 5
 
-    if args.step <= 8:
-        print("\n─── Step 8: Upload to Drive ────────────────────────────────")
-        step8_upload(video_dir, state_path, args.video_id, dry_run=dry_run)
+    if args.step <= 6 and not pipeline_failed_at:
+        assembly_ok = run_gated_step(6, step6_assembly,
+                                     video_dir, state_path, args.video_id, dry_run=dry_run)
+        if assembly_ok is None:
+            pipeline_failed_at = 6
 
-    print(f"\n{'=' * 70}")
-    print(f"✅ PIPELINE COMPLETE — Video {args.video_id}")
-    print(f"{'=' * 70}")
+    if args.step <= 7 and not pipeline_failed_at:
+        polish_ok = run_gated_step(7, step7_polish,
+                                   video_dir, state_path, args.video_id, dry_run=dry_run)
+        if polish_ok is None:
+            pipeline_failed_at = 7
+
+    if args.step <= 8 and not pipeline_failed_at:
+        run_gated_step(8, step8_upload,
+                       video_dir, args.topic, state_path, args.video_id, dry_run=dry_run)
+
+    # ─── Mark blocked steps (Learning 23) ──────────────────────────────────
+    if pipeline_failed_at:
+        for blocked_step in range(pipeline_failed_at + 1, 9):
+            if args.step <= blocked_step:
+                update_state(state_path, args.video_id, blocked_step, "blocked",
+                             f"Blocked by Step {pipeline_failed_at} failure")
+        log_blocked_steps(pipeline_failed_at + 1, args.video_id, pipeline_failed_at)
+        print(f"\n{'=' * 70}")
+        print(f"❌ PIPELINE HALTED at Step {pipeline_failed_at} — Video {args.video_id}")
+        print(f"   Steps {pipeline_failed_at + 1}-8 blocked. Check Error Log in Google Sheets.")
+        print(f"{'=' * 70}")
+        sys.exit(1)
+    else:
+        print(f"\n{'=' * 70}")
+        print(f"✅ PIPELINE COMPLETE — Video {args.video_id}")
+        print(f"{'=' * 70}")
 
 
 if __name__ == "__main__":
