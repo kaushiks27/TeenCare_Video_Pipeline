@@ -668,3 +668,25 @@ KLING_SECRET_KEY=...            # Kling 3.0
 - Without `--config`, scripts default to original hardcoded scenes (backward compatible)
 - **Critical**: All existing ffmpeg filter chains (1.2x anchor, last-40% B-roll, xfade, BGM) MUST remain byte-identical
 
+### Learning 26: Video prompts MUST follow Kling shot-by-shot structure (2026-03-24)
+- Per `36_Kling_3.0_UPDATE_2026.md`: every video prompt needs 4 sections: **Shot**, **Details**, **Camera**, **Mood**
+- Anchor prompts: `Shot: Medium close-up, near-static, eye-level. Details: [character action, lighting, texture]. Camera: 50mm lens, subtle push-in. Mood: Warm, maternal.`
+- B-roll prompts: `Shot: Medium shot, slow pan. Details: [scene description]. Camera: 35mm lens, smooth pan. Mood: Studious, cozy.`
+- Per `33_KlingCameraPDF.pdf.md`: "Always start your prompt with the camera angle and build from there"
+- Include **lens reference** (35mm, 50mm, 85mm) — this triggers Kling to treat it as camera footage, not animation
+- **Reference**: `video_expert_baseline.md` Section 4 (Video Generation) and Section 5 (Camera Movement Toolkit)
+
+### Learning 27: Voice blueprint MUST include punctuation pauses and tapering (2026-03-24)
+- Per `41_Consistent_Character_Voices_in_Veo_3.1.md`: use `...` and punctuation for natural pauses
+- Blueprint format: `'tone, accent, pace, authority. Pauses before key words... as if thinking. Sentences taper off slightly.'`
+- Copy-paste the EXACT same blueprint into EVERY anchor prompt — never paraphrase
+- Dialogue lines must also use `...` pauses: `"Number one... 'the phrase.'"`
+- **16 tone presets available** in Lesson 41 — current pipeline uses "Confident" variant
+
+### Learning 28: Script generation MUST include few-shot JSON example (2026-03-24)
+- Per `11_how_to_write_prompts.md` Step 6: provide weak → upgraded prompt example
+- System prompt for script generation (Step 1) must include a complete JSON example showing ideal output
+- This prevents GPT from inventing field names, using wrong dialogue lengths, or missing caption entries
+- Example topic used: "Signs your teen is struggling" with full rules+captions structure
+- **Critical**: The few-shot example must demonstrate the `...` pause pattern and ≤8 word limit
+

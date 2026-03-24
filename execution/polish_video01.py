@@ -1,31 +1,33 @@
 #!/usr/bin/env python3
 """
-Video 01 — Final Polish (transitions + captions + fade-to-black + BGM)
+Video Polish (transitions + captions + fade-to-black + BGM)
 
 Multi-stage pipeline:
-  Stage 1: Cross-dissolve transitions (xfade 0.3s) — ALREADY DONE
+  Stage 1: Cross-dissolve transitions (xfade 0.3s) — includes brand card
   Stage 2: Poppins SemiBold captions via PIL + ffmpeg overlay
-  Stage 3: Fade-to-black ending (1s)
+  Stage 3: Fade-to-black ending (1s) — after brand card
   Stage 4: BGM overlay at 15%
 
 Usage:
     python3 execution/polish_video01.py
+    python3 execution/polish_video01.py --config .tmp/scene_config.json
 """
 from __future__ import annotations
 
 import os
 import sys
+import json
 import subprocess
 from pathlib import Path
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
-CLIPS_DIR = Path(".tmp/assembly_v3")
+DEFAULT_CLIPS_DIR = Path(".tmp/assembly_v3")
 POLISH_DIR = Path(".tmp/polish")
-OUTPUT_DIR = Path("assets/video_01/videos")
-FINAL_OUTPUT = OUTPUT_DIR / "video_01_final.mp4"
-BGM_TRACK = Path("examples/audio_lock/bgm_track.mp3")
+DEFAULT_OUTPUT_DIR = Path("assets/video_01/videos")
+DEFAULT_FINAL_OUTPUT = DEFAULT_OUTPUT_DIR / "video_01_final.mp4"
+DEFAULT_BGM_TRACK = Path("examples/audio_lock/bgm_track.mp3")
 FONT_FILE = Path("assets/fonts/Poppins-SemiBold.ttf")
 FONT_BOLD = Path("assets/fonts/Poppins-Bold.ttf")
 
@@ -34,7 +36,8 @@ XFADE_DUR = 0.3
 FADE_OUT = 1.0
 VIDEO_W, VIDEO_H = 1080, 1920
 
-CLIPS = [
+# Default clips for Video 01 (preserved for backward compatibility)
+DEFAULT_CLIPS = [
     {"file": "00_a1_hook.ts",              "type": "anchor"},
     {"file": "01_a2_rule1_speaking.ts",    "type": "anchor"},
     {"file": "02_b1_safety.ts",            "type": "broll"},
@@ -43,10 +46,11 @@ CLIPS = [
     {"file": "05_a4_rule3_speaking.ts",    "type": "anchor"},
     {"file": "06_b3_belief.ts",            "type": "broll"},
     {"file": "07_a5_cta.ts",              "type": "anchor"},
+    {"file": "08_brand_card.ts",          "type": "brand"},
 ]
 
-# Captions for anchor clips only
-CAPTIONS = [
+# Default captions for Video 01
+DEFAULT_CAPTIONS = [
     {"clip_idx": 0, "line1": "When your child fails a test...",
                     "line2": "say these three things."},
     {"clip_idx": 1, "line1": "Number one...",
@@ -58,6 +62,28 @@ CAPTIONS = [
     {"clip_idx": 7, "line1": "Share this...",
                     "line2": "to help another parent."},
 ]
+
+
+def load_config():
+    """Load polish config from --config flag or use defaults (Learning 25)."""
+    config_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--config" and i + 1 < len(sys.argv):
+            config_path = Path(sys.argv[i + 1])
+            break
+
+    if config_path and config_path.exists():
+        print(f"   Loading config: {config_path}")
+        cfg = json.loads(config_path.read_text())
+        clips_dir = Path(cfg.get("clips_dir", str(DEFAULT_CLIPS_DIR)))
+        output_dir = Path(cfg.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
+        final_output = Path(cfg.get("final_output", str(output_dir / "final_polished.mp4")))
+        bgm = Path(cfg.get("bgm_track", str(DEFAULT_BGM_TRACK)))
+        clips = cfg.get("clips", DEFAULT_CLIPS)
+        captions = cfg.get("captions", DEFAULT_CAPTIONS)
+        return clips_dir, output_dir, final_output, bgm, clips, captions
+    else:
+        return DEFAULT_CLIPS_DIR, DEFAULT_OUTPUT_DIR, DEFAULT_FINAL_OUTPUT, DEFAULT_BGM_TRACK, DEFAULT_CLIPS, DEFAULT_CAPTIONS
 
 
 def run_cmd(cmd, desc=""):
@@ -303,8 +329,11 @@ def stage4_bgm(input_file):
 
 
 def main():
+    global CLIPS_DIR, OUTPUT_DIR, FINAL_OUTPUT, BGM_TRACK, CLIPS, CAPTIONS
+    CLIPS_DIR, OUTPUT_DIR, FINAL_OUTPUT, BGM_TRACK, CLIPS, CAPTIONS = load_config()
+
     print("=" * 70)
-    print("VIDEO 01 — FINAL POLISH")
+    print("VIDEO POLISH")
     print(f"   Transitions: cross-dissolve ({XFADE_DUR}s)")
     print(f"   Captions: Poppins SemiBold (white + yellow)")
     print(f"   Ending: fade-to-black ({FADE_OUT}s)")

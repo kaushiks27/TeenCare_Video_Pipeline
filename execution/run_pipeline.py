@@ -84,10 +84,13 @@ STYLE_SUFFIX = (
     "shadows, no cold tones, no text, no watermark, no extra characters."
 )
 
-# ─── LOCKED Voice Blueprint (Rule Set 9.1 compliant — NO "Filipino"/"accent") ──
+# ─── LOCKED Voice Blueprint (Rule Set 9.1 + Lesson 41 voice consistency) ──────
+# GAP 2 FIX: Enhanced with punctuation pauses per 41_Consistent_Character_Voices_in_Veo_3.1.md
 VOICE_BLUEPRINT = (
     'Warm maternal tone, clear English, medium pace, gentle authority. '
-    'Brief pauses before key phrases as if thinking.'
+    'Briefly pauses before key words... as if thinking. '
+    'Sentences taper off slightly rather than ending sharply. '
+    'Controlled pacing with clear pauses between statements.'
 )
 
 # ─── LOCKED Anchor Images (Rule Set 8 — NEVER regenerate) ─────────────────────
@@ -193,16 +196,16 @@ def step1_concept_and_script(topic: str, video_dir: Path, state_path: Path, vid:
         print(f"   ✓ [DRY RUN] Mock script generated")
         return result
 
-    system = """You are a world-class scriptwriter for short-form vertical video (30-35s).
-You write scripts for a Filipino parenting education brand called TeenCare.
-The anchor character is a warm Filipina grandmother (Lola) who speaks PURE ENGLISH.
+    system = """You are a world-class parenting content writer for viral short-form video.
+Your audience: Filipino parents on TikTok/Facebook Reels.
+Character: A Filipina grandmother ("Lola") who gives warm, wise parenting advice.
 
 STRICT RULES:
 - Always a 3-rule listicle structure (EXACTLY 3 — never 2, never 5)
 - Video structure: Hook (4s) → Rule 1 Lead (4s) → Rule 1 B-roll (4s) → Rule 2 Lead (4s) → Rule 2 B-roll (3-4s) → Rule 3 Lead (3-4s) → Rule 3 B-roll (3-4s) → CTA (3-4s)
 - 8 scenes total (5 anchor + 3 B-roll)
 - CRITICAL: Each line of dialogue must be ≤8 WORDS. Count them. This prevents lip-sync stuttering.
-- Dialogue structure: "[2-3 words]... '[2-3 word phrase].'" — proven safe pattern
+- Dialogue structure: "[2-3 words]... '[2-3 word phrase].'" — use "..." for natural pauses
 - PURE ENGLISH only — no Tagalog, no code-switching
 - B-roll must show 11-13 year old students (NOT younger) in school/home settings
 - NSFW-safe: family-friendly only
@@ -226,6 +229,28 @@ OUTPUT JSON:
     {"scene": "A4", "line1": "Number Three", "line2": "The phrase"},
     {"scene": "B3", "line1": "", "line2": ""},
     {"scene": "A5", "line1": "Share this", "line2": "for another parent"}
+  ]
+}
+
+FEW-SHOT EXAMPLE (for topic "Signs your teen is struggling"):
+{
+  "topic": "Signs your teen is struggling",
+  "hook_line": "Parents... watch for these signs.",
+  "rules": [
+    {"number": 1, "phrase": "sudden silence", "lead_dialogue": "Number one... 'sudden silence.'", "broll_scene": "A 12-year-old Filipino student sitting quietly alone at a school desk while classmates chat nearby"},
+    {"number": 2, "phrase": "grades dropping fast", "lead_dialogue": "Number two... 'grades dropping fast.'", "broll_scene": "A 13-year-old Filipino student looking worried at a test paper with low marks at a wooden home desk"},
+    {"number": 3, "phrase": "sleeping too much", "lead_dialogue": "And number three... 'sleeping too much.'", "broll_scene": "A 12-year-old Filipino student falling asleep at a school library table with books open"}
+  ],
+  "cta_line": "Share this... for another parent.",
+  "captions": [
+    {"scene": "A1", "line1": "Parents", "line2": "Watch for these signs"},
+    {"scene": "A2", "line1": "Number One", "line2": "Sudden Silence"},
+    {"scene": "B1", "line1": "", "line2": ""},
+    {"scene": "A3", "line1": "Number Two", "line2": "Grades Dropping Fast"},
+    {"scene": "B2", "line1": "", "line2": ""},
+    {"scene": "A4", "line1": "Number Three", "line2": "Sleeping Too Much"},
+    {"scene": "B3", "line1": "", "line2": ""},
+    {"scene": "A5", "line1": "Share This", "line2": "For Another Parent"}
   ]
 }"""
 
@@ -442,17 +467,19 @@ def step4_video_prompts(script: dict, image_results: list, video_dir: Path,
 
         if is_anchor:
             dialogue = dialogue_map.get(scene_id, "")
-            # Compliant prompt: near-static (9.3), eye contact (L18),
-            # no finger counts (L17), clean voice (9.1)
+            # GAP 1 FIX: Kling shot-by-shot structure per 36_Kling_3.0_UPDATE_2026.md
+            # Compliant: near-static (9.3), eye contact (L18), no finger counts (L17),
+            # clean voice (9.1), voice blueprint (Lesson 41)
             prompt = (
-                f"Near-static camera, medium close-up, eye-level. "
-                f"The character looks directly at the camera throughout. "
-                f"She begins to speak with natural lip movement. "
-                f"Warm golden light creates soft highlights on her face. "
-                f"Extremely subtle push-in, barely perceptible dolly. "
-                f"Hands gesture warmly and naturally. "
-                f"Camera: Near-static. Smooth. No handheld shake. "
-                f"Mood: Warm, maternal, inviting. "
+                f"Shot: Medium close-up, near-static, eye-level. "
+                f"Details: "
+                f"Warm Filipina grandmother speaks directly to camera with gentle hand gestures. "
+                f"Soft smile lines visible, kind dark brown eyes making direct eye contact throughout. "
+                f"Warm golden light from window creates gentle rim light on grey-streaked hair. "
+                f"Subtle breathing motion, natural blink rate, slight head tilts between phrases. "
+                f"Camera: 50mm lens equivalent, extremely subtle push-in, near-static. "
+                f"Smooth, no handheld shake. Shallow depth of field, background softly blurred. "
+                f"Mood: Warm, maternal, inviting, trustworthy. "
                 f'The woman says: "{dialogue}" '
                 f"Voice: {VOICE_BLUEPRINT}"
             )
@@ -461,11 +488,16 @@ def step4_video_prompts(script: dict, image_results: list, video_dir: Path,
             if scene_id.startswith("b") and len(scene_id) > 1 and scene_id[1].isdigit():
                 broll_idx = int(scene_id[1]) - 1
             broll_desc = rules[broll_idx].get("broll_scene", "") if broll_idx < len(rules) else ""
-            # B-roll: gentle motion, NO dialogue (Learning 10 — Kling sound off)
+            # GAP 3 FIX: B-roll with Shot/Details/Camera/Mood per Kling Camera Toolkit
             prompt = (
-                f"Gentle camera movement, medium shot. {broll_desc} "
-                f"Warm golden lighting, soft cinematic feel. 5 seconds. "
-                f"Camera: Very slow gentle pan. No dialogue. Ambient warmth only."
+                f"Shot: Medium shot, slow gentle pan left-to-right. "
+                f"Details: {broll_desc}. "
+                f"Warm afternoon sunlight through window, soft paper and wood textures visible. "
+                f"Natural ambient warmth, subtle dust particles in light beams. "
+                f"Camera: 35mm lens equivalent, smooth slow pan, no handheld shake. "
+                f"Muted warm tones, natural color grading. "
+                f"Mood: Studious, cozy, hopeful. "
+                f"No dialogue. No text. Ambient only. 5 seconds."
             )
 
         video_prompts.append({
@@ -570,10 +602,102 @@ def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 6: Assembly
 # Compliant with: Learning 12 (1.2x anchor speed, last 40% B-roll, BGM 15%)
+#                 Learning 25 (dynamic scene config via --config)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step6_assembly(video_dir: Path, state_path: Path, vid: int, dry_run: bool = False):
-    """Run assembly — uses existing assemble_video01.py."""
+def generate_scene_config(video_dir: Path, vid: int, script: dict = None) -> Path:
+    """Generate scene_config.json for assembly/polish from pipeline state (Learning 25).
+
+    Maps dynamic scene IDs (a2_rule1, b1_rule1) to file paths that assembly/polish need.
+    """
+    config_dir = Path(".tmp")
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_dir / f"scene_config_{vid}.json"
+
+    # Read video_results.json to get actual scene IDs and paths
+    results_path = video_dir / "video_results.json"
+    if results_path.exists():
+        video_results = json.loads(results_path.read_text())
+    else:
+        video_results = []
+
+    # Build scene list from video results
+    scenes = []
+    clips = []
+    for i, vr in enumerate(video_results):
+        scene_id = vr.get("id", f"scene_{i}")
+        scene_type = vr.get("type", "anchor")
+        video_file = vr.get("path", "")
+
+        # For assembly: relative path from video_dir
+        if video_file:
+            rel_path = f"{scene_id}/anchor_video.mp4" if scene_type == "anchor" else f"{scene_id}/broll_video.mp4"
+        else:
+            rel_path = f"{scene_id}/video.mp4"
+
+        scenes.append({
+            "id": scene_id,
+            "file": rel_path,
+            "type": scene_type,
+        })
+        clips.append({
+            "file": f"{i:02d}_{scene_id}.ts",
+            "type": scene_type,
+        })
+
+    # Add brand card at the end
+    scenes.append({"id": "brand_card", "file": None, "type": "brand"})
+    clips.append({"file": f"{len(video_results):02d}_brand_card.ts", "type": "brand"})
+
+    # Build captions from script
+    captions = []
+    if script:
+        hook = script.get("hook_line", "")
+        rules = script.get("rules", [])
+        cta = script.get("cta_line", "")
+        caption_data = script.get("captions", [])
+
+        # Map anchor clip indices to captions
+        anchor_indices = [i for i, s in enumerate(scenes) if s["type"] == "anchor"]
+        for idx, cap in enumerate(caption_data):
+            if cap.get("line1") or cap.get("line2"):
+                # Find the matching clip index
+                clip_idx = idx if idx < len(clips) else None
+                # Only anchor clips get captions
+                scene_name = cap.get("scene", "")
+                if scene_name.startswith("A"):
+                    # Map A1→0, A2→anchor_indices[1], etc.
+                    a_num = int(scene_name[1]) - 1 if len(scene_name) > 1 else idx
+                    if a_num < len(anchor_indices):
+                        clip_idx = anchor_indices[a_num]
+                if clip_idx is not None and (cap.get("line1") or cap.get("line2")):
+                    captions.append({
+                        "clip_idx": clip_idx,
+                        "line1": cap.get("line1", ""),
+                        "line2": cap.get("line2", ""),
+                    })
+
+    config = {
+        "base_dir": str(video_dir / "videos"),
+        "output": str(video_dir / "videos" / f"video_{vid:02d}_final.mp4"),
+        "bgm_track": str(Path("examples/audio_lock/bgm_track.mp3")),
+        "brand_card": str(Path("examples/brand_outro_lock/brand_outro_lock_upscaled.png")),
+        "scenes": scenes,
+        "clips_dir": str(Path(".tmp/assembly_v3")),
+        "output_dir": str(video_dir / "videos"),
+        "final_output": str(video_dir / "videos" / f"video_{vid:02d}_final.mp4"),
+        "clips": clips,
+        "captions": captions,
+    }
+
+    config_path.write_text(json.dumps(config, indent=2))
+    print(f"   ✓ Scene config: {config_path}")
+    return config_path
+
+
+def step6_assembly(video_dir: Path, state_path: Path, vid: int,
+                   dry_run: bool = False, config_path: Path = None):
+    """Run assembly — uses existing assemble_video01.py with --config."""
     update_state(state_path, vid, 6, "running",
                  "Running ffmpeg assembly (1.2x anchors, trim B-roll, BGM)...")
     if dry_run:
@@ -581,10 +705,12 @@ def step6_assembly(video_dir: Path, state_path: Path, vid: int, dry_run: bool = 
         update_state(state_path, vid, 6, "done", "[DRY RUN] Assembly simulated")
         print(f"   ✓ [DRY RUN] Assembly simulated")
         return True
-    result = subprocess.run(
-        [sys.executable, "execution/assemble_video01.py"],
-        capture_output=True, text=True, cwd=str(Path.cwd()),
-    )
+
+    cmd = [sys.executable, "execution/assemble_video01.py"]
+    if config_path and config_path.exists():
+        cmd.extend(["--config", str(config_path)])
+
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(Path.cwd()))
     if result.returncode == 0:
         update_state(state_path, vid, 6, "done", "Assembly complete")
         print(f"   ✓ Assembly done")
@@ -600,10 +726,12 @@ def step6_assembly(video_dir: Path, state_path: Path, vid: int, dry_run: bool = 
 # STEP 7: Polish
 # Compliant with: Learning 13 (xfade 0.3s, Kalam-Bold font, 60% caption pos,
 #                 fade-to-black 1.0s, BGM 15%)
+#                 Learning 25 (dynamic scene config via --config)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step7_polish(video_dir: Path, state_path: Path, vid: int, dry_run: bool = False):
-    """Run polish — uses existing polish_video01.py."""
+def step7_polish(video_dir: Path, state_path: Path, vid: int,
+                 dry_run: bool = False, config_path: Path = None):
+    """Run polish — uses existing polish_video01.py with --config."""
     update_state(state_path, vid, 7, "running",
                  "Running polish (xfade, Kalam captions, fade-to-black, BGM)...")
     if dry_run:
@@ -611,10 +739,12 @@ def step7_polish(video_dir: Path, state_path: Path, vid: int, dry_run: bool = Fa
         update_state(state_path, vid, 7, "done", "[DRY RUN] Polish simulated")
         print(f"   ✓ [DRY RUN] Polish simulated")
         return True
-    result = subprocess.run(
-        [sys.executable, "execution/polish_video01.py"],
-        capture_output=True, text=True, cwd=str(Path.cwd()),
-    )
+
+    cmd = [sys.executable, "execution/polish_video01.py"]
+    if config_path and config_path.exists():
+        cmd.extend(["--config", str(config_path)])
+
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(Path.cwd()))
     if result.returncode == 0:
         update_state(state_path, vid, 7, "done", "Polish complete — final video ready")
         print(f"   ✓ Polish done — final video ready")
@@ -777,15 +907,25 @@ def main():
         if video_results is None:
             pipeline_failed_at = 5
 
+    # Generate scene config for assembly/polish (Learning 25)
+    scene_config_path = None
+    if not pipeline_failed_at and args.step <= 6:
+        if not dry_run:
+            scene_config_path = generate_scene_config(video_dir, args.video_id, script)
+        else:
+            print(f"   ✓ [DRY RUN] Scene config generation skipped")
+
     if args.step <= 6 and not pipeline_failed_at:
         assembly_ok = run_gated_step(6, step6_assembly,
-                                     video_dir, state_path, args.video_id, dry_run=dry_run)
+                                     video_dir, state_path, args.video_id,
+                                     dry_run=dry_run, config_path=scene_config_path)
         if assembly_ok is None:
             pipeline_failed_at = 6
 
     if args.step <= 7 and not pipeline_failed_at:
         polish_ok = run_gated_step(7, step7_polish,
-                                   video_dir, state_path, args.video_id, dry_run=dry_run)
+                                   video_dir, state_path, args.video_id,
+                                   dry_run=dry_run, config_path=scene_config_path)
         if polish_ok is None:
             pipeline_failed_at = 7
 

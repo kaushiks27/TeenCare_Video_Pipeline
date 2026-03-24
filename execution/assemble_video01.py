@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Video 01 — Final Assembly v3 (ffmpeg filter_complex)
+Video Assembly (ffmpeg filter_complex)
 
-Stitches all 8 video clips in sequence:
-  A1 → A2 → B1 → A3 → B2 → A4 → B3 → A5
+Stitches all video clips in sequence:
+  A1 → A2 → B1 → A3 → B2 → A4 → B3 → A5 → Brand Card
 
-Rules (from Learning 12):
+Rules (from Learning 12 + 21):
   - Anchor videos (A1-A5): Speed up 1.2x (video + audio)
   - B-roll videos (B1-B3): Normal speed (1.0x), silent audio
+  - Brand card: 2s static image with silent audio
   - BGM: bgm_track.mp3 looped at 15% volume beneath dialogue
   - Audio MUST NOT bleed across clip boundaries
   - Output: 9:16 portrait MP4
@@ -18,23 +19,28 @@ Fix for audio bleed:
 
 Usage:
     python3 execution/assemble_video01.py
+    python3 execution/assemble_video01.py --config .tmp/scene_config.json
 """
 from __future__ import annotations
 
 import os
 import sys
+import json
 import subprocess
 from pathlib import Path
 from datetime import datetime
 
-BASE = Path("assets/video_01/videos")
-OUTPUT = BASE / "video_01_final.mp4"
+# ─── Default config (Video 01 hardcoded — backward compatible) ────────────────
+DEFAULT_BASE = Path("assets/video_01/videos")
+DEFAULT_OUTPUT = DEFAULT_BASE / "video_01_final.mp4"
 TEMP_DIR = Path(".tmp/assembly_v3")
-BGM_TRACK = Path("examples/audio_lock/bgm_track.mp3")
+DEFAULT_BGM_TRACK = Path("examples/audio_lock/bgm_track.mp3")
 BGM_VOLUME = 0.15  # 15% volume for BGM
+DEFAULT_BRAND_CARD = Path("examples/brand_outro_lock/brand_outro_lock_upscaled.png")
+BRAND_CARD_DURATION = 2.0  # seconds
 
-# Scene order: A1 → A2 → B1 → A3 → B2 → A4 → B3 → A5
-SCENES = [
+# Default scenes for Video 01 (preserved for backward compatibility)
+DEFAULT_SCENES = [
     {"id": "a1_hook",            "file": "a1_hook/anchor_video.mp4",               "type": "anchor"},
     {"id": "a2_rule1_speaking",  "file": "a2_rule1_speaking/anchor_video.mp4",     "type": "anchor"},
     {"id": "b1_safety",          "file": "b1_safety/broll_video.mp4",              "type": "broll"},
@@ -43,7 +49,29 @@ SCENES = [
     {"id": "a4_rule3_speaking",  "file": "a4_rule3_speaking/anchor_video.mp4",     "type": "anchor"},
     {"id": "b3_belief",          "file": "b3_belief/broll_video.mp4",              "type": "broll"},
     {"id": "a5_cta",             "file": "a5_cta/anchor_video.mp4",               "type": "anchor"},
+    {"id": "brand_card",         "file": None,                                     "type": "brand"},
 ]
+
+
+def load_config():
+    """Load scene config from --config flag or use defaults (Learning 25)."""
+    config_path = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--config" and i + 1 < len(sys.argv):
+            config_path = Path(sys.argv[i + 1])
+            break
+
+    if config_path and config_path.exists():
+        print(f"   Loading config: {config_path}")
+        cfg = json.loads(config_path.read_text())
+        base = Path(cfg.get("base_dir", str(DEFAULT_BASE)))
+        output = Path(cfg.get("output", str(base / "final_assembled.mp4")))
+        bgm = Path(cfg.get("bgm_track", str(DEFAULT_BGM_TRACK)))
+        brand = Path(cfg.get("brand_card", str(DEFAULT_BRAND_CARD)))
+        scenes = cfg.get("scenes", DEFAULT_SCENES)
+        return base, output, bgm, brand, scenes
+    else:
+        return DEFAULT_BASE, DEFAULT_OUTPUT, DEFAULT_BGM_TRACK, DEFAULT_BRAND_CARD, DEFAULT_SCENES
 
 
 def run_cmd(cmd, desc=""):
@@ -70,8 +98,10 @@ def get_duration(filepath):
 
 
 def main():
+    BASE, OUTPUT, BGM_TRACK, BRAND_CARD, SCENES = load_config()
+
     print("=" * 70)
-    print("VIDEO 01 — FINAL ASSEMBLY v3 (filter_complex)")
+    print("VIDEO ASSEMBLY (filter_complex)")
     print(f"   Scenes: {len(SCENES)} clips")
     print(f"   Anchor speed: 1.2x")
     print(f"   B-roll speed: 1.0x (normal)")
@@ -83,11 +113,15 @@ def main():
     # Verify all source files exist
     missing = []
     for s in SCENES:
+        if s["type"] == "brand":
+            continue  # Brand card is generated from PNG, not a video file
         p = BASE / s["file"]
         if not p.exists():
             missing.append(str(p))
     if not BGM_TRACK.exists():
         missing.append(str(BGM_TRACK))
+    if not BRAND_CARD.exists():
+        missing.append(str(BRAND_CARD))
     if missing:
         print(f"\nERROR: Missing files:")
         for m in missing:
@@ -101,12 +135,31 @@ def main():
     # using -t to hard-cut both streams to exact same length
     normalized = []
     for i, scene in enumerate(SCENES):
-        src = BASE / scene["file"]
         dst = TEMP_DIR / f"{i:02d}_{scene['id']}.ts"  # Use .ts for lossless concat
 
         print(f"\n[{i+1}/{len(SCENES)}] {scene['id']} ({scene['type']})")
 
-        if scene["type"] == "anchor":
+        if scene["type"] == "brand":
+            # Brand card: generate 2s video from static PNG with silent audio
+            print(f"   Brand card: {BRAND_CARD} → {BRAND_CARD_DURATION}s clip")
+            cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1", "-i", str(BRAND_CARD),
+                "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", f"{BRAND_CARD_DURATION:.6f}",
+                "-vf", "scale=1080:1920:force_original_aspect_ratio=decrease,"
+                       "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+                "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+                "-pix_fmt", "yuv420p",
+                "-shortest",
+                str(dst),
+            ]
+            if not run_cmd(cmd, f"Brand card → {dst.name}"):
+                print(f"   FAILED: {scene['id']}")
+                sys.exit(1)
+        elif scene["type"] == "anchor":
+            src = BASE / scene["file"]
             # Get source video duration, then compute sped-up duration
             src_dur = get_duration(src)
             target_dur = src_dur / 1.2
@@ -142,9 +195,10 @@ def main():
                 if not run_cmd(cmd_fallback, "fallback (silent audio)"):
                     print(f"   FAILED: {scene['id']}")
                     sys.exit(1)
-        else:
+        elif scene["type"] == "broll":
             # B-roll: normal speed, silent audio, TRIM TO LAST 40%
             # (keep second half — skip first 60% of the clip)
+            src = BASE / scene["file"]
             src_dur = get_duration(src)
             trim_dur = src_dur * 0.40  # keep last 40%
             skip_to = src_dur * 0.60   # start from 60% mark
@@ -245,7 +299,7 @@ def main():
     print(f"✅ FINAL VIDEO ASSEMBLED: {OUTPUT}")
     print(f"   Size: {size_mb:.1f}MB")
     print(f"   Resolution: 1080x1920 (9:16)")
-    print(f"   Anchor speed: 1.2x | B-roll speed: 1.0x")
+    print(f"   Anchor speed: 1.2x | B-roll speed: 1.0x | Brand card: {BRAND_CARD_DURATION}s")
     print(f"   BGM: {BGM_TRACK} at {BGM_VOLUME} volume")
 
     probe = subprocess.run(
