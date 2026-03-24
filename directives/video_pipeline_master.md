@@ -690,3 +690,12 @@ KLING_SECRET_KEY=...            # Kling 3.0
 - Example topic used: "Signs your teen is struggling" with full rules+captions structure
 - **Critical**: The few-shot example must demonstrate the `...` pause pattern and ≤8 word limit
 
+### Learning 29: Flat file structure + auto-cleanup after Drive upload (2026-03-24)
+- **Images**: `assets/video_XX/images/scene_id.png` (flat, no nested per-scene folders)
+- **Videos**: `assets/video_XX/videos/scene_id.mp4` (flat)
+- **JSONs**: `assets/video_XX/pipeline/` subfolder (script.json, image_prompts.json, video_prompts.json, image_results.json, video_results.json)
+- **Final**: `assets/video_XX/final/` subfolder (assembled + polished output)
+- **After confirmed Drive upload**: `cleanup_local_assets()` deletes `images/`, `videos/`, `.tmp/assembly_v3/`, `.tmp/polish/`
+- **Preserved**: `pipeline/` (lightweight JSONs for reference) and `final/` (reference copy)
+- **If upload fails**: local files are NOT deleted — error message says "local files preserved"
+

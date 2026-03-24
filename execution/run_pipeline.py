@@ -258,9 +258,10 @@ FEW-SHOT EXAMPLE (for topic "Signs your teen is struggling"):
 
     result = chatgpt(system, user)
 
-    # Save
-    video_dir.mkdir(parents=True, exist_ok=True)
-    script_path = video_dir / "script.json"
+    # Save to pipeline/ subfolder
+    pipeline_dir = video_dir / "pipeline"
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+    script_path = pipeline_dir / "script.json"
     script_path.write_text(json.dumps(result, indent=2))
 
     update_state(state_path, vid, 1, "done",
@@ -328,7 +329,9 @@ def step2_image_prompts(script: dict, video_dir: Path, state_path: Path, vid: in
         anchor_entries[4],  # A5
     ]
 
-    prompts_path = video_dir / "image_prompts.json"
+    pipeline_dir = video_dir / "pipeline"
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
+    prompts_path = pipeline_dir / "image_prompts.json"
     prompts_path.write_text(json.dumps(all_entries, indent=2))
 
     update_state(state_path, vid, 2, "done",
@@ -358,13 +361,11 @@ def step3_generate_images(prompts: list, video_dir: Path, state_path: Path, vid:
         update_state(state_path, vid, 3, "running",
                      f"Processing image {i+1}/{total}: {p['title']}")
 
-        scene_dir = images_dir / p["id"]
-        scene_dir.mkdir(parents=True, exist_ok=True)
-
+        # Flat file structure: images/scene_id.png (no nested folders)
         if p["type"] == "anchor":
             # LOCKED — copy from examples/ (Learning 8)
             src = Path(p["locked_image"])
-            dst = scene_dir / "anchor.png"
+            dst = images_dir / f"{p['id']}.png"
             if src.exists():
                 shutil.copy2(str(src), str(dst))
                 results.append({"id": p["id"], "type": "anchor",
@@ -376,7 +377,7 @@ def step3_generate_images(prompts: list, video_dir: Path, state_path: Path, vid:
                                 "path": None, "status": "MISSING"})
         else:
             # B-roll — generate via gpt-image-1.5 (Learning 9)
-            output_path = scene_dir / "broll.png"
+            output_path = images_dir / f"{p['id']}.png"
 
             if dry_run:
                 time.sleep(1)
@@ -420,7 +421,8 @@ def step3_generate_images(prompts: list, video_dir: Path, state_path: Path, vid:
                 results.append({"id": p["id"], "type": "broll",
                                 "path": None, "status": "FAILED"})
 
-    results_path = video_dir / "image_results.json"
+    pipeline_dir = video_dir / "pipeline"
+    results_path = pipeline_dir / "image_results.json"
     results_path.write_text(json.dumps(results, indent=2))
 
     ok = sum(1 for r in results if r["status"] == "OK")
@@ -508,7 +510,8 @@ def step4_video_prompts(script: dict, image_results: list, video_dir: Path,
             "dialogue": dialogue_map.get(scene_id, ""),
         })
 
-    prompts_path = video_dir / "video_prompts.json"
+    pipeline_dir = video_dir / "pipeline"
+    prompts_path = pipeline_dir / "video_prompts.json"
     prompts_path.write_text(json.dumps(video_prompts, indent=2))
 
     n_anchor = sum(1 for v in video_prompts if v["type"] == "anchor")
@@ -534,6 +537,7 @@ def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path
     Uses video_engines module (Learning 22, 24). Matches proven Kling script line-by-line.
     """
     videos_dir = video_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
     results = []
     total = len(video_prompts)
 
@@ -541,9 +545,8 @@ def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path
         update_state(state_path, vid, 5, "running",
                      f"Generating video {i+1}/{total}: {vp['id']} via Kling 3.0")
 
-        scene_dir = videos_dir / vp["id"]
-        scene_dir.mkdir(parents=True, exist_ok=True)
-        output = scene_dir / ("anchor_video.mp4" if vp["type"] == "anchor" else "broll_video.mp4")
+        # Flat file structure: videos/scene_id.mp4 (no nested folders)
+        output = videos_dir / f"{vp['id']}.mp4"
 
         if dry_run:
             time.sleep(2)
@@ -579,7 +582,8 @@ def step5_generate_videos(video_prompts: list, video_dir: Path, state_path: Path
                         "path": str(output) if success else None, "status": status})
         print(f"   {'✓' if success else '✗'} [{i+1}/{total}] {vp['id']}: {status}")
 
-    results_path = video_dir / "video_results.json"
+    pipeline_dir = video_dir / "pipeline"
+    results_path = pipeline_dir / "video_results.json"
     results_path.write_text(json.dumps(results, indent=2))
 
     ok = sum(1 for r in results if r["status"] == "OK")
@@ -614,26 +618,22 @@ def generate_scene_config(video_dir: Path, vid: int, script: dict = None) -> Pat
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / f"scene_config_{vid}.json"
 
-    # Read video_results.json to get actual scene IDs and paths
-    results_path = video_dir / "video_results.json"
+    # Read video_results.json from pipeline/ subfolder
+    results_path = video_dir / "pipeline" / "video_results.json"
     if results_path.exists():
         video_results = json.loads(results_path.read_text())
     else:
         video_results = []
 
-    # Build scene list from video results
+    # Build scene list from video results (flat file paths)
     scenes = []
     clips = []
     for i, vr in enumerate(video_results):
         scene_id = vr.get("id", f"scene_{i}")
         scene_type = vr.get("type", "anchor")
-        video_file = vr.get("path", "")
 
-        # For assembly: relative path from video_dir
-        if video_file:
-            rel_path = f"{scene_id}/anchor_video.mp4" if scene_type == "anchor" else f"{scene_id}/broll_video.mp4"
-        else:
-            rel_path = f"{scene_id}/video.mp4"
+        # Flat file structure: videos/scene_id.mp4
+        rel_path = f"{scene_id}.mp4"
 
         scenes.append({
             "id": scene_id,
@@ -760,10 +760,35 @@ def step7_polish(video_dir: Path, state_path: Path, vid: int,
 # STEP 8: Upload to Drive
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def cleanup_local_assets(video_dir: Path):
+    """Delete local images + videos after confirmed Drive upload.
+
+    Keeps: pipeline/ (lightweight JSONs) and final/ (reference).
+    Deletes: images/, videos/, and .tmp/ intermediates.
+    """
+    cleaned = []
+    for subdir in ["images", "videos"]:
+        target = video_dir / subdir
+        if target.exists():
+            shutil.rmtree(str(target))
+            cleaned.append(subdir)
+
+    # Clean .tmp/ intermediates (assembly .ts files + polish stages)
+    for tmp_subdir in [Path(".tmp/assembly_v3"), Path(".tmp/polish")]:
+        if tmp_subdir.exists():
+            shutil.rmtree(str(tmp_subdir))
+            cleaned.append(str(tmp_subdir))
+
+    if cleaned:
+        print(f"   🧹 Cleaned: {', '.join(cleaned)}")
+    return cleaned
+
+
 def step8_upload(video_dir: Path, topic: str, state_path: Path, vid: int, dry_run: bool = False):
-    """Upload pipeline assets to Google Drive with date/topic folder structure.
+    """Upload pipeline assets to Google Drive, then cleanup local files.
 
     Uses drive_uploader module (Learning 24). Creates YYYY-MM-DD/XX_topic/ folders.
+    After confirmed upload, deletes local images/videos (keeps pipeline/ JSONs).
     """
     update_state(state_path, vid, 8, "running",
                  "Uploading to Google Drive (date/topic folders)...")
@@ -782,15 +807,21 @@ def step8_upload(video_dir: Path, topic: str, state_path: Path, vid: int, dry_ru
                       f"{uploaded.get('final', 0)} final")
             update_state(state_path, vid, 8, "done", detail)
             print(f"   ✓ {detail}")
+
+            # Auto-cleanup local assets after confirmed upload
+            cleaned = cleanup_local_assets(video_dir)
+            if cleaned:
+                print(f"   ✓ Local cleanup complete (pipeline/ JSONs preserved)")
+
             return True
         else:
             reason = result.get('reason', 'unknown')
             update_state(state_path, vid, 8, "error", f"Upload failed: {reason}")
-            print(f"   ✗ Upload failed: {reason}")
+            print(f"   ✗ Upload failed: {reason} — local files preserved")
             return False
     except Exception as e:
         update_state(state_path, vid, 8, "error", f"Upload error: {str(e)[:200]}")
-        print(f"   ✗ Upload error: {e}")
+        print(f"   ✗ Upload error: {e} — local files preserved")
         return False
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -153,32 +153,33 @@ def upload_pipeline_assets(video_dir: Path, topic: str, video_id: int,
 
     uploaded = {"images": 0, "videos": 0, "final": 0}
 
-    # Upload images
+    # Upload images (flat: images/*.png)
     images_dir = video_dir / "images"
     if images_dir.exists():
         print(f"\n   📷 Uploading images...")
-        for img_dir in sorted(images_dir.iterdir()):
-            if img_dir.is_dir():
-                for img_file in img_dir.glob("*.png"):
-                    if _upload_file(service, img_file, images_folder):
-                        uploaded["images"] += 1
-                for img_file in img_dir.glob("*.jpg"):
-                    if _upload_file(service, img_file, images_folder):
-                        uploaded["images"] += 1
+        for img_file in sorted(images_dir.glob("*.png")):
+            if _upload_file(service, img_file, images_folder):
+                uploaded["images"] += 1
+        for img_file in sorted(images_dir.glob("*.jpg")):
+            if _upload_file(service, img_file, images_folder):
+                uploaded["images"] += 1
 
-    # Upload individual video clips
+    # Upload individual video clips (flat: videos/*.mp4)
     videos_dir = video_dir / "videos"
     if videos_dir.exists():
         print(f"\n   🎬 Uploading video clips...")
-        for vid_dir in sorted(videos_dir.iterdir()):
-            if vid_dir.is_dir():
-                for vid_file in vid_dir.glob("*.mp4"):
-                    if _upload_file(service, vid_file, videos_folder):
-                        uploaded["videos"] += 1
+        for vid_file in sorted(videos_dir.glob("*.mp4")):
+            # Skip final assembled videos (upload those to final/)
+            if "final" in vid_file.name:
+                continue
+            if _upload_file(service, vid_file, videos_folder):
+                uploaded["videos"] += 1
 
-    # Upload final polished video
+    # Upload final polished video (check final/ then videos/)
     print(f"\n   🎯 Uploading final video...")
     final_patterns = [
+        video_dir / "final" / f"video_{video_id:02d}_final.mp4",
+        video_dir / "final" / "final.mp4",
         video_dir / "videos" / f"video_{video_id:02d}_final.mp4",
         video_dir / "videos" / "video_01_final.mp4",
     ]
@@ -188,8 +189,8 @@ def upload_pipeline_assets(video_dir: Path, topic: str, video_id: int,
                 uploaded["final"] += 1
             break
 
-    # Upload script.json for reference
-    script_path = video_dir / "script.json"
+    # Upload script.json from pipeline/ subfolder
+    script_path = video_dir / "pipeline" / "script.json"
     if script_path.exists():
         _upload_file(service, script_path, topic_folder)
 
