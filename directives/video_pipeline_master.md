@@ -623,3 +623,19 @@ KLING_SECRET_KEY=...            # Kling 3.0
 - **Reason**: Duplicating scripts creates maintenance debt, makes bug fixes harder, and violates the 3-layer architecture (directives → orchestration → deterministic scripts)
 - **Migration plan**: Rename current scripts to generic names (drop `video02_` prefix), add config file support, validate output quality is identical
 - **Priority**: MUST be done before Video 03 production begins
+
+### Learning 21: Parameterized orchestrator must be validated against ALL directive rules (2026-03-24)
+- When creating `run_pipeline.py` (parameterized master orchestrator), the first version had **9 violations** of locked directive rules:
+  1. **Generated anchor images** instead of copying from `examples/anchor_character_lock/` (violates Learning 8 + Rule Set 8)
+  2. **Used Veo 3.1 as primary** instead of Kling 3.0 (violates Learning 19)
+  3. **Included "Filipino-English accent"** in voice blueprint (violates Rule Set 9.1 — causes Tagalog bleed + stuttering)
+  4. **No word count limit** on dialogue (violates Rule Set 9.6 — must be ≤8 words)
+  5. **Used "slow dolly in"** for camera (violates Rule Set 9.3 — must be "near-static", "extremely subtle push-in")
+  6. **Prompted specific finger counts** (violates Learning 17 — AI can't reliably render finger counts)
+  7. **Missing eye-contact directive** (violates Learning 18 — "looks directly at camera" is mandatory)
+  8. **Wrong BGM volume** (used 50% instead of 15%, violates Learning 12)
+  9. **Wrong image model** for B-roll in prompt descriptions (used gpt-image in step 2 prompts but didn't properly flag anchor images as locked-only)
+- **Root cause**: The orchestrator was written from memory/summary instead of reading the full directive line-by-line
+- **Rule**: When creating ANY new execution script, read `video_pipeline_master.md` in FULL first. Cross-check every decision against the Self-Annealing Log (Learnings 1-20). Do NOT rely on memory.
+- **Rule**: Script headers should list which rules they comply with (e.g., `# Compliant with: Learning 8, Rule Set 9.1, ...`)
+- **Script**: `execution/run_pipeline.py` — the corrected parameterized orchestrator

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeenCare Reel Pipeline — Dashboard</title>
+    <meta name="description" content="Viral topic research and video pipeline dashboard for TeenCare parenting content.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <span class="brand-emoji">🤱</span>
+                <h1>TeenCare <span class="brand-accent">Reel Pipeline</span></h1>
+            </div>
+            <div class="header-status" id="global-status">
+                <span class="status-dot idle"></span>
+                <span class="status-text">Ready</span>
+            </div>
+        </header>
+
+        <!-- View: Config -->
+        <section class="view active" id="view-config">
+            <div class="card glass config-card">
+                <h2>🎯 New Research Session</h2>
+                <p class="subtitle">Discover viral teen parenting topics from Instagram, TikTok & Facebook</p>
+
+                <div class="config-section">
+                    <label class="config-label">Number of Videos</label>
+                    <div class="slider-container">
+                        <input type="range" id="video-count" min="1" max="7" value="7" class="slider">
+                        <div class="slider-value" id="video-count-display">7</div>
+                    </div>
+                    <p class="config-hint">Maximum 7 videos per session</p>
+                </div>
+
+                <div class="config-section">
+                    <label class="config-label">API Keys Status</label>
+                    <div id="api-keys-grid" class="api-keys-grid">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <button class="btn-primary" id="btn-start" onclick="startResearch()">
+                    <span class="btn-icon">🔍</span>
+                    Start Viral Research
+                </button>
+            </div>
+        </section>
+
+        <!-- View: Research Dashboard -->
+        <section class="view" id="view-dashboard">
+            <!-- Progress Panel -->
+            <div class="card glass progress-card">
+                <div class="progress-header">
+                    <h2>📊 Research Progress</h2>
+                    <span class="progress-percent" id="progress-percent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+                </div>
+                <p class="progress-detail" id="progress-detail">Initializing...</p>
+
+                <!-- Step-by-step progress -->
+                <div class="steps-list" id="steps-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Topics Grid -->
+            <div class="section-header">
+                <h2>🔥 Discovered Topics</h2>
+                <span class="topic-count" id="topic-count">0 topics</span>
+            </div>
+            <div class="topics-grid" id="topics-grid">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <!-- View: Pipeline Status -->
+        <section class="view" id="view-pipeline">
+            <div class="section-header">
+                <h2>🎬 Video Pipeline Status</h2>
+            </div>
+            <div class="pipeline-grid" id="pipeline-grid">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <!-- Navigation -->
+        <nav class="bottom-nav">
+            <button class="nav-btn active" onclick="switchView('config')">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-label">Config</span>
+            </button>
+            <button class="nav-btn" onclick="switchView('dashboard')">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">Research</span>
+            </button>
+            <button class="nav-btn" onclick="switchView('pipeline')">
+                <span class="nav-icon">🎬</span>
+                <span class="nav-label">Pipeline</span>
+            </button>
+        </nav>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
